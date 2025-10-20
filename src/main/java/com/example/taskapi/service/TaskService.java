@@ -14,6 +14,19 @@ import java.util.Date;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
+
+// Kubernetes client imports
+import io.kubernetes.client.openapi.ApiClient;
+import io.kubernetes.client.openapi.ApiException;
+import io.kubernetes.client.openapi.apis.CoreV1Api;
+import io.kubernetes.client.openapi.models.V1Container;
+import io.kubernetes.client.openapi.models.V1ObjectMeta;
+import io.kubernetes.client.openapi.models.V1Pod;
+import io.kubernetes.client.openapi.models.V1PodSpec;
+import io.kubernetes.client.openapi.models.V1PodStatus;
+import io.kubernetes.client.util.ClientBuilder;
+import io.kubernetes.client.util.Config;
 
 @Service
 public class TaskService {
@@ -101,57 +114,88 @@ public class TaskService {
     }
 
     private TaskExecution executeCommand(String command) {
+        // Execute by creating a short-lived BusyBox pod in the current namespace
         TaskExecution execution = new TaskExecution();
         execution.setStartTime(new Date());
 
-        ProcessBuilder processBuilder = new ProcessBuilder();
-        processBuilder.redirectErrorStream(true); // merge stderr into stdout
-
-        if (System.getProperty("os.name").toLowerCase().contains("windows")) {
-            processBuilder.command("cmd.exe", "/c", command);
-        } else {
-            processBuilder.command("sh", "-c", command);
-        }
+        String namespace = System.getenv().getOrDefault("POD_NAMESPACE", "default");
+        String podName = "task-exec-" + System.currentTimeMillis();
+        StringBuilder output = new StringBuilder();
 
         try {
-            Process process = processBuilder.start();
+            ApiClient client = null;
+            try {
+                client = Config.fromCluster();
+            } catch (Exception inClusterEx) {
+                client = ClientBuilder.defaultClient();
+            }
+            io.kubernetes.client.openapi.Configuration.setDefaultApiClient(client);
+            CoreV1Api api = new CoreV1Api(client);
 
-            StringBuilder output = new StringBuilder();
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    if (output.length() + line.length() + 1 > MAX_OUTPUT_SIZE) {
-                        output.append("\n[Output truncated due to size limit]");
-                        break;
-                    }
-                    output.append(line).append("\n");
+            V1Container container = new V1Container()
+                .name("runner")
+                .image("busybox:1.36")
+                .addArgsItem("sh")
+                .addArgsItem("-c")
+                .addArgsItem(command);
+
+            V1Pod pod = new V1Pod()
+                .metadata(new V1ObjectMeta().name(podName).namespace(namespace))
+                .spec(new V1PodSpec()
+                    .addContainersItem(container)
+                    .restartPolicy("Never"));
+
+            api.createNamespacedPod(namespace, pod, null, null, null, null);
+
+            long start = System.currentTimeMillis();
+            long timeoutMs = COMMAND_TIMEOUT_SECONDS * 1000L;
+
+            // Poll pod status until Succeeded/Failed or timeout
+            while (true) {
+                if (System.currentTimeMillis() - start > timeoutMs) {
+                    try { api.deleteNamespacedPod(podName, namespace, null, null, 0, null, null, null); } catch (Exception ignore) {}
+                    execution.setEndTime(new Date());
+                    execution.setOutput("Command execution timed out after " + COMMAND_TIMEOUT_SECONDS + " seconds");
+                    throw new RuntimeException("timeout");
+                }
+
+                V1Pod current = api.readNamespacedPod(podName, namespace, null);
+                V1PodStatus status = current.getStatus();
+                String phase = status != null ? status.getPhase() : null;
+                if ("Succeeded".equalsIgnoreCase(phase) || "Failed".equalsIgnoreCase(phase)) {
+                    break;
+                }
+                Thread.sleep(500);
+            }
+
+            // Fetch logs (merged stdout/stderr is default for Kubernetes logs)
+            String logs = api.readNamespacedPodLog(podName, namespace, null, null, null, null, null, null, null, null, null);
+            if (logs != null) {
+                if (logs.length() > MAX_OUTPUT_SIZE) {
+                    output.append(logs, 0, MAX_OUTPUT_SIZE).append("\n[Output truncated due to size limit]");
+                } else {
+                    output.append(logs);
                 }
             }
-
-            boolean finished = process.waitFor(COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-            if (!finished) {
-                process.destroyForcibly();
-                execution.setEndTime(new Date());
-                execution.setOutput("Command execution timed out after " + COMMAND_TIMEOUT_SECONDS + " seconds");
-                throw new RuntimeException("timeout");
-            }
-
             execution.setEndTime(new Date());
-            int exitCode = process.exitValue();
-            if (exitCode != 0) {
-                output.append("[Process exited with code: ").append(exitCode).append("]");
-            }
             execution.setOutput(output.toString());
             return execution;
-        } catch (IOException e) {
+        } catch (ApiException e) {
             execution.setEndTime(new Date());
-            execution.setOutput("Error executing command: " + e.getMessage());
-            throw new RuntimeException("execution_error: " + e.getMessage(), e);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
+            execution.setOutput("Kubernetes API error: " + e.getMessage());
+            throw new RuntimeException("k8s_api_error: " + e.getMessage(), e);
+        } catch (Exception e) {
             execution.setEndTime(new Date());
-            execution.setOutput("Interrupted while executing command");
-            throw new RuntimeException("execution_interrupted", e);
+            execution.setOutput("Error executing in Kubernetes: " + e.getMessage());
+            throw new RuntimeException("k8s_exec_error: " + e.getMessage(), e);
+        } finally {
+            // Best-effort cleanup; ignore errors if pod already gone
+            try {
+                ApiClient client;
+                try { client = Config.fromCluster(); } catch (Exception inClusterEx) { client = ClientBuilder.defaultClient(); }
+                CoreV1Api api = new CoreV1Api(client);
+                api.deleteNamespacedPod(podName, namespace, null, null, 0, null, null, null);
+            } catch (Exception ignore) {}
         }
     }
 }

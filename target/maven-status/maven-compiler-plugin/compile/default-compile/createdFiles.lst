@@ -1,0 +1,6 @@
+com\example\taskapi\model\Task.class
+com\example\taskapi\model\TaskExecution.class
+com\example\taskapi\controller\TaskController.class
+com\example\taskapi\service\TaskService.class
+com\example\taskapi\TaskApiApplication.class
+com\example\taskapi\repository\TaskRepository.class

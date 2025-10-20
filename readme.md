@@ -65,26 +65,38 @@ The frontend communicates with the Spring Boot backend through a proxy configura
 - Columns: ID, Name, Owner, Command, Executions Count, Actions
 - Pagination with customizable page sizes
 - Command display with syntax highlighting
+<img width="1693" height="802" alt="Screenshot 2025-10-20 203803" src="https://github.com/user-attachments/assets/2fd6a618-3181-4e05-b968-23289cf46228" />
 
 ### Search Functionality
 - Real-time search by task name
 - Case-insensitive matching
 - Clear search to show all tasks
+<img width="1737" height="756" alt="Screenshot 2025-10-20 203830" src="https://github.com/user-attachments/assets/46958a20-6c9d-4154-b9b5-353c03793ade" />
+<img width="1722" height="710" alt="Screenshot 2025-10-20 203902" src="https://github.com/user-attachments/assets/580f58fb-1f57-4f93-93b7-eb6f67cc1c80" />
+
 
 ### Create Task Modal
 - Form validation for all fields
 - Command field with textarea for multi-line commands
 - Real-time validation feedback
+<img width="1798" height="757" alt="Screenshot 2025-10-20 203926" src="https://github.com/user-attachments/assets/1535bb3f-92b7-4662-b59a-5efd86682afc" />
+
 
 ### Task Execution
 - Execute tasks with visual loading indicator
 - Results displayed in a side drawer
 - Shows execution time, duration, and output
 - Output formatted with syntax highlighting
+<img width="1791" height="817" alt="Screenshot 2025-10-20 203947" src="https://github.com/user-attachments/assets/f2406a9d-9537-4585-b589-26846103109e" />
+
+<img width="1648" height="654" alt="Screenshot 2025-10-20 204005" src="https://github.com/user-attachments/assets/0034770f-6a97-4c2f-9281-249d0248307d" />
+
+
 
 ### Delete Confirmation
 - Popconfirm dialog for safe deletion
 - Prevents accidental task removal
+<img width="1794" height="656" alt="Screenshot 2025-10-20 204024" src="https://github.com/user-attachments/assets/21a0a157-4ede-48b2-9cdd-f0c556eb2210" />
 
 ## Component Structure
 
